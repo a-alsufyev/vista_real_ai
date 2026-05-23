@@ -1,0 +1,112 @@
+{
+  "entities": {
+    "Company": {
+      "title": "Company",
+      "description": "Represents a real estate agency or company",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "subscription_plan": { "type": "string", "enum": ["free", "pro", "enterprise"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Represents an employee/agent in a company",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["owner", "agent"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "email", "name", "role"]
+    },
+    "Lead": {
+      "title": "Lead",
+      "description": "A potential client",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "budget": { "type": "number" },
+        "city": { "type": "string" },
+        "district": { "type": "string" },
+        "rooms": { "type": "integer" },
+        "status": { "type": "string" },
+        "assignedAgentId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "name", "rooms"]
+    },
+    "Property": {
+      "title": "Property",
+      "description": "A real estate property listing",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "propertyType": { "type": "string" },
+        "city": { "type": "string" },
+        "district": { "type": "string" },
+        "address": { "type": "string" },
+        "price": { "type": "number" },
+        "rooms": { "type": "integer" },
+        "area": { "type": "number" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "status": { "type": "string" },
+        "agentId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "title"]
+    },
+    "Deal": {
+      "title": "Deal",
+      "description": "A transaction between a lead and a property",
+      "type": "object",
+      "properties": {
+        "companyId": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "leadId": { "type": "string" },
+        "price": { "type": "number" },
+        "commission": { "type": "number" },
+        "status": { "type": "string" },
+        "stage": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["companyId", "propertyId", "leadId"]
+    }
+  },
+  "firestore": {
+    "/companies/{companyId}": {
+      "schema": "Company",
+      "description": "Core company data"
+    },
+    "/companies/{companyId}/users/{userId}": {
+      "schema": "User",
+      "description": "Users belonging to a company"
+    },
+    "/companies/{companyId}/leads/{leadId}": {
+      "schema": "Lead",
+      "description": "Leads for a company"
+    },
+    "/companies/{companyId}/properties/{propertyId}": {
+      "schema": "Property",
+      "description": "Properties managed by a company"
+    },
+    "/companies/{companyId}/deals/{dealId}": {
+      "schema": "Deal",
+      "description": "Deals closed by a company"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Global user index (links to companyId)"
+    }
+  }
+}

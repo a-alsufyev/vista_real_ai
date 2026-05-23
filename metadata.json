@@ -1,0 +1,8 @@
+{
+  "name": "VistaReal AI CRM",
+  "description": "AI-powered CRM for real estate agencies. Manage leads, properties, and deals with an intelligent assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

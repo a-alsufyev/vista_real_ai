@@ -1,0 +1,76 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Check if user is a member of the company
+    function isCompanyMember(companyId) {
+      return isSignedIn() && exists(/databases/$(database)/documents/companies/$(companyId)/users/$(request.auth.uid));
+    }
+
+    // Check if user is the owner of the user profile
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // --- Companies ---
+    match /companies/{companyId} {
+      allow get: if isCompanyMember(companyId);
+      // Companies can only be created during onboarding/registration (system logic)
+      // For simplicity in this CRM, we allow creation if signed in and verified
+      allow create: if isSignedIn() && isEmailVerified() && isValidId(companyId);
+      
+      // Secondary collections
+      match /users/{userId} {
+        allow read: if isCompanyMember(companyId);
+        allow write: if isOwner(userId) && (companyId == incoming().companyId || companyId == existing().companyId);
+      }
+
+      match /leads/{leadId} {
+        allow read: if isCompanyMember(companyId);
+        allow create, update, delete: if isCompanyMember(companyId);
+      }
+
+      match /properties/{propertyId} {
+        allow read: if isCompanyMember(companyId);
+        allow create, update, delete: if isCompanyMember(companyId);
+      }
+
+      match /deals/{dealId} {
+        allow read: if isCompanyMember(companyId);
+        allow create, update, delete: if isCompanyMember(companyId);
+      }
+    }
+
+    // --- User Global Index ---
+    match /users/{userId} {
+      allow get: if isSignedIn(); // Allow get for login lookups
+      allow create, update: if isOwner(userId);
+      allow delete: if false;
+    }
+  }
+}
