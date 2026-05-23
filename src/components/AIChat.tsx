@@ -42,7 +42,15 @@ const searchClientsTool: any = {
   }
 };
 
-
+const normalizeCity = (city: string): string => {
+  if (!city) return "";
+  const c = city.toLowerCase().trim();
+  if (c.includes("тбилис") || c.includes("tbilisi") || c.includes("tiflis")) return "tbilisi";
+  if (c.includes("батум") || c.includes("batumi")) return "batumi";
+  if (c.includes("кутаис") || c.includes("kutaisi")) return "kutaisi";
+  if (c.includes("рустав") || c.includes("rustavi")) return "rustavi";
+  return c;
+};
 
 export default function AIChat() {
   const { language, token, user, messages, setMessages, clearMessages } = useStore();
@@ -295,7 +303,7 @@ export default function AIChat() {
             const args = call.args as any;
             const apiRes = await fetch("/api/properties", { headers: { Authorization: `Bearer ${token}` } });
             let props = await apiRes.json().catch(() => []);
-            if (args.city) props = props.filter((p: any) => p.city?.toLowerCase() === args.city.toLowerCase());
+            if (args.city) props = props.filter((p: any) => normalizeCity(p.city) === normalizeCity(args.city));
             if (args.maxPrice) props = props.filter((p: any) => p.price <= args.maxPrice);
             if (args.minRooms) props = props.filter((p: any) => p.rooms >= args.minRooms);
             
@@ -306,7 +314,7 @@ export default function AIChat() {
             const args = call.args as any;
             const apiRes = await fetch("/api/leads", { headers: { Authorization: `Bearer ${token}` } });
             let clients = await apiRes.json().catch(() => []);
-            if (args.city) clients = clients.filter((l: any) => l.city?.toLowerCase() === args.city.toLowerCase());
+            if (args.city) clients = clients.filter((l: any) => normalizeCity(l.city) === normalizeCity(args.city));
             if (args.maxBudget) clients = clients.filter((l: any) => l.budget <= args.maxBudget);
 
             functionResponses.push({
