@@ -12,14 +12,17 @@ import jwt from "jsonwebtoken";
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
 // JWT Secret
 const JWT_SECRET = process.env.JWT_SECRET || "georeal-ai-secret-key-12345";
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
+  console.warn("WARN: JWT_SECRET environment variable is missing in production. Falling back to default.");
+}
 
 // Initialize SQLite
 const db = new Database("database.sqlite");
+
+// Enable Write-Ahead Logging (WAL) mode for superior production database concurrency and speed
+db.pragma("journal_mode = WAL");
 
 // Initialize Database Schema
 db.exec(`
@@ -1028,9 +1031,33 @@ If you want to perform real-time workspace actions, you can write:
   }
 
   const PORT = 3000;
-  app.listen(PORT, "0.0.0.0", () => {
+  const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
+
+  // Graceful shutdown handling for production Docker environment
+  const shutdown = () => {
+    console.log("Shutdown signal received. Closing server and database connections...");
+    server.close(() => {
+      console.log("HTTP server closed.");
+      try {
+        db.close();
+        console.log("SQLite database connection closed.");
+      } catch (dbErr) {
+        console.error("Error closing database connection during shutdown:", dbErr);
+      }
+      process.exit(0);
+    });
+
+    // Forcefully shut down after 10s if graceful shutdown gets stuck
+    setTimeout(() => {
+      console.error("Forceful shutdown triggered after timeout limit.");
+      process.exit(1);
+    }, 10000);
+  };
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 startServer();
