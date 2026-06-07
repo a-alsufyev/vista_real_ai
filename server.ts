@@ -18,8 +18,15 @@ if (!process.env.JWT_SECRET && process.env.NODE_ENV === "production") {
   console.warn("WARN: JWT_SECRET environment variable is missing in production. Falling back to default.");
 }
 
-// Initialize SQLite
-const db = new Database("database.sqlite");
+// Initialize SQLite (supports DATABASE_PATH environment variable for production docker persistence volumes)
+const dbPath = process.env.DATABASE_PATH || "database.sqlite";
+if (dbPath.includes("/")) {
+  const dbDir = path.dirname(dbPath);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+}
+const db = new Database(dbPath);
 
 // Enable Write-Ahead Logging (WAL) mode for superior production database concurrency and speed
 db.pragma("journal_mode = WAL");
