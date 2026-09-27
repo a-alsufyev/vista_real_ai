@@ -52,6 +52,45 @@ const normalizeCity = (city: string): string => {
   return c;
 };
 
+export const cleanAiText = (rawText: string): string => {
+  if (!rawText) return "";
+  let text = rawText;
+
+  // 1. Remove markdown code fence markers (```json, ```)
+  text = text.replace(/```(?:json)?/gi, "");
+
+  // 2. Remove any remaining raw JSON objects with CREATE_* types if lingering
+  text = text.replace(/\{\s*"type"\s*:\s*"(?:CREATE_CLIENT|CREATE_PROPERTY|CREATE_DEAL)"[\s\S]*?\}/gi, "");
+
+  // 3. Remove lines that contain JSON announcements or references
+  // e.g.: "Вот JSON...", "Вот JSON блок...", "Вот JSON для создания...", "Here is the JSON..."
+  text = text.replace(/^[ \t]*(?:[Вв]от|[Нн]иже|[Сс]генерирован|[Пп]рикрепляю|[Сс]оздан|[Дд]ержите)?[^\n]*\b(?:JSON|json)\b[^\n]*$/gim, "");
+  text = text.replace(/^[ \t]*Here\s+is\s+(?:the\s+)?(?:structured\s+CRM\s+data\s+block|JSON[^\n]*|JSON\s+instruction[^\n]*).*$/gim, "");
+  text = text.replace(/^[ \t]*\*(?:Please review the listing specifications[^\n]*)\*$/gim, "");
+
+  // 4. Remove any inline sentence/clause mentioning "вот JSON..." or "JSON блок"
+  text = text.replace(/(?:[Вв]от|[Нн]иже|[Сс]генерирован|[Пп]рикрепляю|[Сс]оздан|[Дд]ержите)\s*(?:структурированный|сформированный)?\s*(?:CRM\s+)?(?:JSON|json)[\w\s-]*(?:для\s+[^\n.:!?]+)?[:.!?]?/gi, "");
+
+  // 5. Standalone JSON word or leftovers
+  text = text.replace(/^[ \t]*(?:JSON|json)\s*[:.-]?[ \t]*$/gim, "");
+
+  // 6. Clean dangling colons or punctuation left over from removed "Вот JSON:"
+  text = text.replace(/:\s*$/gm, "");
+
+  // 6b. Remove second phrase like "Вот доступные объекты" or similar
+  text = text.replace(/(?:[Вв]от|[Нн]иже)?\s*(?:доступные|подходящие)\s*(?:объекты|варианты)[:.!?]?\s*$/gim, "");
+
+  // 7. Collapse empty lines
+  text = text
+    .split("\n")
+    .map(line => line.trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return text;
+};
+
 export default function AIChat() {
   const { language, token, user, messages, setMessages, clearMessages } = useStore();
   const t = translations[language as keyof typeof translations] || translations.en;
@@ -69,6 +108,12 @@ export default function AIChat() {
     JSON format for property: {"type": "CREATE_PROPERTY", "data": {"title": "...", "price": 0, "city": "...", "district": "...", "rooms": 0, "area": 0, "address": "...", "property_type": "Apartment"}}
     JSON format for deal: {"type": "CREATE_DEAL", "data": {"lead_id": "...", "property_id": "...", "amount": 0, "status": "lead"}}
     
+    CRITICAL USER EXPERIENCE REQUIREMENT:
+    NEVER write words like "JSON", "код", "структура данных", or phrases like "Вот JSON...", "Ниже JSON...", "Here is the JSON..." in your response to the user.
+    The user is a real estate agent and must NEVER see technical references to JSON.
+    When creating a client, write simply "Клиент Иван Петров создан" (using the actual client's name). Do NOT write any second phrase like "Вот доступные объекты:" or mention listings.
+    The JSON data block will be processed automatically behind the scenes, so do NOT mention or announce it in text.
+
     IMPORTANT: When creating a deal, the "lead_id" and "property_id" are REQUIRED. You should find them from the search results mentioned earlier in the conversation.
     If there are multiple potential clients or properties and it's not clear which ones to use for the deal, you MUST ask the user for clarification before returning the CREATE_DEAL JSON.
     Example of clarification: "You mentioned two properties in Vake. Which one should we use for the deal with Arsen?"
@@ -368,7 +413,33 @@ export default function AIChat() {
           if (endIndex !== -1) {
             const jsonStr = aiText.substring(startIndex, endIndex);
             action = JSON.parse(jsonStr);
-            aiText = (aiText.substring(0, startIndex) + aiText.substring(endIndex)).trim();
+
+            let beforePart = aiText.substring(0, startIndex);
+            let afterPart = aiText.substring(endIndex);
+
+            // Strip trailing code fences before JSON and leading code fences after JSON
+            beforePart = beforePart.replace(/```(?:json)?\s*$/i, "");
+            afterPart = afterPart.replace(/^\s*```/i, "");
+
+            aiText = cleanAiText(beforePart + " " + afterPart);
+
+            // If aiText became empty after removing JSON and JSON announcement phrases, provide friendly default text
+            if (!aiText) {
+              if (action.type === "CREATE_CLIENT") {
+                const name = action.data?.name ? ` ${action.data.name}` : "";
+                aiText = language === 'ru' 
+                  ? `Клиент${name} создан` 
+                  : (language === 'ka' ? `კლიენტი${name} შეიქმნა` : `Client${name} created`);
+              } else if (action.type === "CREATE_PROPERTY") {
+                aiText = language === 'ru' 
+                  ? `Объект "${action.data?.title || ''}" успешно добавлен в базу.` 
+                  : (language === 'ka' ? `ობიექტი "${action.data?.title || ''}" წარმატებით დაემატა.` : `Property "${action.data?.title || ''}" successfully added.`);
+              } else if (action.type === "CREATE_DEAL") {
+                aiText = language === 'ru' 
+                  ? `Сделка успешно создана.` 
+                  : (language === 'ka' ? `გარიგება წარმატებით შეიქმნა.` : `Deal successfully created.`);
+              }
+            }
             
             // Normalize numeric fields
             if (action.data) {
@@ -502,18 +573,34 @@ export default function AIChat() {
             }
 
             if (!apiRes.ok) {
-              const errData = await apiRes.json().catch(() => ({}));
-              if (apiRes.status === 403 && errData.error === "LIMIT_REACHED") {
-                const demoMsg = translations[language as keyof typeof translations]?.demo_limit_reached || errData.message;
-                aiText = demoMsg;
-                action = null;
-              } else {
-                console.error("Failed to execute AI action", await apiRes.text());
+              let errData: any = {};
+              try {
+                errData = await apiRes.json();
+              } catch {
+                errData = {};
               }
+
+              if (apiRes.status === 403 && errData.error === "LIMIT_REACHED") {
+                const demoMsg = (translations[language as keyof typeof translations] as any)?.demo_limit_reached || errData.message;
+                aiText = demoMsg;
+              } else {
+                console.error("Failed to execute AI action:", errData.error || errData.message || apiRes.statusText);
+                const errMsg = errData.message || errData.error;
+                if (errMsg) {
+                  aiText = `${aiText}\n\n⚠️ ${errMsg}`;
+                }
+              }
+              action = null;
             } else {
-              const createdData = await apiRes.json();
+              const createdData = await apiRes.json().catch(() => null);
               if (createdData && createdData.id) {
                 action.data.id = createdData.id;
+              }
+              if (action.type === "CREATE_CLIENT") {
+                const name = action.data?.name ? ` ${action.data.name}` : "";
+                aiText = language === 'ru' 
+                  ? `Клиент${name} создан` 
+                  : (language === 'ka' ? `კლიენტი${name} შეიქმნა` : `Client${name} created`);
               }
             }
           }
@@ -521,6 +608,8 @@ export default function AIChat() {
           console.error("Failed to parse or execute AI action", e);
         }
       }
+
+      aiText = cleanAiText(aiText);
 
       const modelMsg: Message = { 
         role: "model", 
@@ -629,10 +718,10 @@ export default function AIChat() {
                   : "bg-[#F3F4F6] text-[#111827] rounded-tl-none"
               }`}>
                 {msg.role === "user" ? (
-                  msg.parts[0].text
+                  msg.parts[0]?.text
                 ) : (
                   <div className="prose prose-sm prose-emerald max-w-none">
-                    <ReactMarkdown>{msg.parts[0].text}</ReactMarkdown>
+                    <ReactMarkdown>{cleanAiText(msg.parts[0]?.text || "")}</ReactMarkdown>
                   </div>
                 )}
               </div>

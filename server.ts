@@ -701,7 +701,11 @@ How can I help you manage your database records today?`;
           rooms: 2
         };
 
-        const responseText = `I have successfully parsed the registration request offline! Here is the structured CRM data block. Please review and hit save:\n\n\`\`\`json\n{"type": "CREATE_CLIENT", "data": ${JSON.stringify(clientData)}}\n\`\`\``;
+        const isRussian = /[а-яё]/i.test(userMsg);
+        const confirmation = isRussian 
+          ? `Клиент ${clientName} успешно добавлен в систему! Найти подходящие объекты?`
+          : `Client ${clientName} has been successfully added to the system! Find matching properties?`;
+        const responseText = `${confirmation}\n\n{"type": "CREATE_CLIENT", "data": ${JSON.stringify(clientData)}}`;
         return res.json({ text: responseText });
       }
 
@@ -726,12 +730,16 @@ How can I help you manage your database records today?`;
           property_type: "Apartment"
         };
 
-        const responseText = `Great! I have successfully drafted the new property listing. Here is the JSON instruction to insert into your sqlite records:\n\n\`\`\`json\n{"type": "CREATE_PROPERTY", "data": ${JSON.stringify(propData)}}\n\`\`\n\n*(Please review the listing specifications before adding to the active catalog)*`;
+        const isRussian = /[а-яё]/i.test(userMsg);
+        const confirmation = isRussian 
+          ? `Объект "${propTitle}" успешно подготовлен для добавления в каталог!`
+          : `Property "${propTitle}" has been prepared for the catalog!`;
+        const responseText = `${confirmation}\n\n{"type": "CREATE_PROPERTY", "data": ${JSON.stringify(propData)}}`;
         return res.json({ text: responseText });
       }
 
       // Heuristic 4: Property search trigger (Returns a tool call so the frontend automatically loads SQLite data!)
-      if (textLower.includes("квартир") || textLower.includes("property") || textLower.includes("properties") || textLower.includes("дом") || textLower.includes("villa") || textLower.includes("жиль") || textLower.includes("listing") || textLower.includes("найди")) {
+      if (textLower.includes("квартир") || textLower.includes("property") || textLower.includes("properties") || textLower.includes("дом") || textLower.includes("villa") || textLower.includes("жиль") || textLower.includes("listing") || textLower.includes("найди") || textLower.includes("объект") || textLower.includes("подходящ") || textLower === "да" || textLower === "давай" || textLower.includes("поищи")) {
         let city = "Tbilisi";
         if (textLower.includes("батуми") || textLower.includes("batumi")) city = "Batumi";
         
@@ -831,12 +839,24 @@ If you want to perform real-time workspace actions, you can write:
       }
 
       const { name, phone, email, budget, city, district, rooms, status } = req.body;
+      const clientName = name || "Новый клиент";
       const id = Math.random().toString(36).substring(2, 15);
       
       db.prepare(`
         INSERT INTO leads (id, company_id, name, phone, email, budget, city, district, rooms, status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, company_id, name, phone, email, budget, city, district, rooms, status || "New");
+      `).run(
+        id, 
+        company_id, 
+        clientName, 
+        phone || null, 
+        email || null, 
+        budget != null ? String(budget) : null, 
+        city || null, 
+        district || null, 
+        rooms != null && !isNaN(Number(rooms)) ? Number(rooms) : null, 
+        status || "New"
+      );
       
       res.json({ id });
     } catch (err: any) {
@@ -897,14 +917,26 @@ If you want to perform real-time workspace actions, you can write:
       }
 
       const { title, description, property_type, city, district, address, price, rooms, area, lat, lng } = req.body;
+      const propertyTitle = title || address || "Новый объект";
       const id = Math.random().toString(36).substring(2, 15);
       
       db.prepare(`
         INSERT INTO properties (id, company_id, title, description, property_type, city, district, address, price, rooms, area, lat, lng)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        id, company_id, title, description, property_type || "Apartment", 
-        city || "Tbilisi", district, address, price || 0, rooms || 0, area || 0, lat, lng
+        id, 
+        company_id, 
+        propertyTitle, 
+        description || "", 
+        property_type || "Apartment", 
+        city || "Tbilisi", 
+        district || null, 
+        address || null, 
+        !isNaN(Number(price)) ? Number(price) : 0, 
+        !isNaN(Number(rooms)) ? Number(rooms) : 0, 
+        !isNaN(Number(area)) ? Number(area) : 0, 
+        lat != null && !isNaN(Number(lat)) ? Number(lat) : null, 
+        lng != null && !isNaN(Number(lng)) ? Number(lng) : null
       );
       
       res.json({ id });
@@ -972,7 +1004,14 @@ If you want to perform real-time workspace actions, you can write:
       db.prepare(`
         INSERT INTO deals (id, company_id, lead_id, property_id, amount, status)
         VALUES (?, ?, ?, ?, ?, ?)
-      `).run(id, company_id, lead_id, property_id, amount, status || "Prospect");
+      `).run(
+        id, 
+        company_id, 
+        lead_id || null, 
+        property_id || null, 
+        !isNaN(Number(amount)) ? Number(amount) : 0, 
+        status || "Prospect"
+      );
       
       res.json({ id });
     } catch (err: any) {
