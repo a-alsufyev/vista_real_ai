@@ -102,8 +102,8 @@ export default function AIChat() {
     You can extract data from messages to create clients, properties, or deals.
     You can also search for existing properties and clients using the provided tools.
     
-    If the user wants to add a client, property, or deal, extract the fields and return a JSON block alongside your text response.
-    IMPORTANT: The JSON block must be valid and complete.
+    If the user wants to add a client, property, or deal, extract the fields and ALWAYS return a JSON block alongside your text response.
+    IMPORTANT: The JSON block must be valid and complete. It is strictly mandatory for every create action so that the system can save the record and render the contact card.
     JSON format for client: {"type": "CREATE_CLIENT", "data": {"name": "...", "phone": "...", "budget": 0, "city": "...", "district": "...", "rooms": 0}}
     JSON format for property: {"type": "CREATE_PROPERTY", "data": {"title": "...", "price": 0, "city": "...", "district": "...", "rooms": 0, "area": 0, "address": "...", "property_type": "Apartment"}}
     JSON format for deal: {"type": "CREATE_DEAL", "data": {"lead_id": "...", "property_id": "...", "amount": 0, "status": "lead"}}
@@ -111,8 +111,8 @@ export default function AIChat() {
     CRITICAL USER EXPERIENCE REQUIREMENT:
     NEVER write words like "JSON", "код", "структура данных", or phrases like "Вот JSON...", "Ниже JSON...", "Here is the JSON..." in your response to the user.
     The user is a real estate agent and must NEVER see technical references to JSON.
-    When creating a client, write simply "Клиент Иван Петров создан" (using the actual client's name). Do NOT write any second phrase like "Вот доступные объекты:" or mention listings.
-    The JSON data block will be processed automatically behind the scenes, so do NOT mention or announce it in text.
+    Simply confirm the action in clean, friendly language (e.g. "Клиент Иван Петров создан."). Do NOT write any second phrase like "Вот доступные объекты:" or mention listings.
+    The JSON data block must ALWAYS be included in your output so it can be processed automatically behind the scenes, but do NOT announce or mention the JSON block in the conversational text.
 
     IMPORTANT: When creating a deal, the "lead_id" and "property_id" are REQUIRED. You should find them from the search results mentioned earlier in the conversation.
     If there are multiple potential clients or properties and it's not clear which ones to use for the deal, you MUST ask the user for clarification before returning the CREATE_DEAL JSON.
@@ -422,24 +422,65 @@ export default function AIChat() {
             afterPart = afterPart.replace(/^\s*```/i, "");
 
             aiText = cleanAiText(beforePart + " " + afterPart);
+          }
+        } catch (e) {
+          console.error("Failed to parse JSON action from AI text", e);
+        }
+      }
 
-            // If aiText became empty after removing JSON and JSON announcement phrases, provide friendly default text
-            if (!aiText) {
-              if (action.type === "CREATE_CLIENT") {
-                const name = action.data?.name ? ` ${action.data.name}` : "";
-                aiText = language === 'ru' 
-                  ? `Клиент${name} создан` 
-                  : (language === 'ka' ? `კლიენტი${name} შეიქმნა` : `Client${name} created`);
-              } else if (action.type === "CREATE_PROPERTY") {
-                aiText = language === 'ru' 
-                  ? `Объект "${action.data?.title || ''}" успешно добавлен в базу.` 
-                  : (language === 'ka' ? `ობიექტი "${action.data?.title || ''}" წარმატებით დაემატა.` : `Property "${action.data?.title || ''}" successfully added.`);
-              } else if (action.type === "CREATE_DEAL") {
-                aiText = language === 'ru' 
-                  ? `Сделка успешно создана.` 
-                  : (language === 'ka' ? `გარიგება წარმატებით შეიქმნა.` : `Deal successfully created.`);
+      // Fallback: If JSON was omitted by the AI model but creation of client is detected
+      if (!action) {
+        const userPrompt = typeof input === "string" ? input : "";
+        const confirmsClientMatch = aiText.match(/клиент\s+([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)\s+(?:создан|добавлен)/i);
+        const createsClient = /(?:добавь|создай|новый)\s+клиент/i.test(userPrompt);
+        
+        if (confirmsClientMatch || createsClient) {
+          const nameMatch = confirmsClientMatch 
+            ? confirmsClientMatch[1] 
+            : userPrompt.match(/(?:клиент(?:а)?)\s+([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)/i)?.[1];
+          if (nameMatch) {
+            const phoneMatch = userPrompt.match(/(\+?\d[\d\s-]{6,15}\d)/)?.[0]?.replace(/[\s-]/g, "") || "";
+            const budgetMatch = userPrompt.match(/(?:бюджет|цена|до)\s*[:=]?\s*(\d+)/i)?.[1] || 
+                                userPrompt.match(/(\d+)\s*(?:\$|доллар|usd)/i)?.[1] || "0";
+            const roomsMatch = userPrompt.match(/(\d+)\s*(?:комнат|комн|room)/i)?.[1] || "0";
+            let cityMatch = "";
+            if (/тбилиси|tbilisi/i.test(userPrompt)) cityMatch = "Tbilisi";
+            else if (/батуми|batumi/i.test(userPrompt)) cityMatch = "Batumi";
+            else if (/кутаиси|kutaisi/i.test(userPrompt)) cityMatch = "Kutaisi";
+
+            action = {
+              type: "CREATE_CLIENT",
+              data: {
+                name: nameMatch.trim(),
+                phone: phoneMatch,
+                budget: Number(budgetMatch) || 0,
+                city: cityMatch || (user?.country === "Armenia" ? "Yerevan" : user?.country === "Kazakhstan" ? "Almaty" : "Tbilisi"),
+                rooms: Number(roomsMatch) || 1
               }
+            };
+          }
+        }
+      }
+
+      if (action) {
+        try {
+          // If aiText became empty after removing JSON and JSON announcement phrases, provide friendly default text
+          if (!aiText) {
+            if (action.type === "CREATE_CLIENT") {
+              const name = action.data?.name ? ` ${action.data.name}` : "";
+              aiText = language === 'ru' 
+                ? `Клиент${name} создан.` 
+                : (language === 'ka' ? `კლიენტი${name} შეიქმნა.` : `Client${name} created.`);
+            } else if (action.type === "CREATE_PROPERTY") {
+              aiText = language === 'ru' 
+                ? `Объект "${action.data?.title || ''}" успешно добавлен в базу.` 
+                : (language === 'ka' ? `ობიექტი "${action.data?.title || ''}" წარმატებით დაემატა.` : `Property "${action.data?.title || ''}" successfully added.`);
+            } else if (action.type === "CREATE_DEAL") {
+              aiText = language === 'ru' 
+                ? `Сделка успешно создана.` 
+                : (language === 'ka' ? `გარიგება წარმატებით შეიქმნა.` : `Deal successfully created.`);
             }
+          }
             
             // Normalize numeric fields
             if (action.data) {
@@ -551,10 +592,9 @@ export default function AIChat() {
                 }
               }
             }
-          }
 
-          if (action) {
-            // Execute action
+            if (action) {
+              // Execute action
             const endpoint = action.type === "CREATE_CLIENT" ? "/api/leads" : 
                             action.type === "CREATE_PROPERTY" ? "/api/properties" : 
                             "/api/deals";
@@ -599,8 +639,8 @@ export default function AIChat() {
               if (action.type === "CREATE_CLIENT") {
                 const name = action.data?.name ? ` ${action.data.name}` : "";
                 aiText = language === 'ru' 
-                  ? `Клиент${name} создан` 
-                  : (language === 'ka' ? `კლიენტი${name} შეიქმნა` : `Client${name} created`);
+                  ? `Клиент${name} создан.` 
+                  : (language === 'ka' ? `კლიენტი${name} შეიქმნა.` : `Client${name} created.`);
               }
             }
           }
