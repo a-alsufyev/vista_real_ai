@@ -120,7 +120,8 @@ export default function AIChat() {
     
     IMPORTANT: Extract numbers (price, budget, rooms, area, amount) correctly from the message. Do not leave them as 0 if they are mentioned.
     IMPORTANT: The "address" field for properties is MANDATORY. If the user doesn't provide it, DO NOT return a CREATE_PROPERTY JSON. Instead, ask the user for the address.
-    IMPORTANT: The "rooms" field for clients is MANDATORY. If the user doesn't provide it, DO NOT return a CREATE_CLIENT JSON. Instead, ask the user for the number of rooms the client is looking for.
+    IMPORTANT: The "rooms" field for clients is STRICTLY MANDATORY.
+    If the user does NOT explicitly specify the number of rooms (or bedrooms) the client is looking for, you MUST NOT create the client, MUST NOT return a CREATE_CLIENT JSON block, and MUST NOT say the client is created. Instead, you MUST ask the user: "Сколько комнат нужно клиенту?" (or "Пожалуйста, укажите количество комнат."). NEVER assume or default to 1 room!
     If the user doesn't specify a city, set "city" to null in the JSON.
     Only return a JSON block if you have all required information and are ready to perform the action.
     When returning a JSON block, keep your text response brief and focused on the action being performed.
@@ -435,29 +436,43 @@ export default function AIChat() {
         const createsClient = /(?:добавь|создай|новый)\s+клиент/i.test(userPrompt);
         
         if (confirmsClientMatch || createsClient) {
-          const nameMatch = confirmsClientMatch 
-            ? confirmsClientMatch[1] 
-            : userPrompt.match(/(?:клиент(?:а)?)\s+([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)/i)?.[1];
-          if (nameMatch) {
-            const phoneMatch = userPrompt.match(/(\+?\d[\d\s-]{6,15}\d)/)?.[0]?.replace(/[\s-]/g, "") || "";
-            const budgetMatch = userPrompt.match(/(?:бюджет|цена|до)\s*[:=]?\s*(\d+)/i)?.[1] || 
-                                userPrompt.match(/(\d+)\s*(?:\$|доллар|usd)/i)?.[1] || "0";
-            const roomsMatch = userPrompt.match(/(\d+)\s*(?:комнат|комн|room)/i)?.[1] || "0";
-            let cityMatch = "";
-            if (/тбилиси|tbilisi/i.test(userPrompt)) cityMatch = "Tbilisi";
-            else if (/батуми|batumi/i.test(userPrompt)) cityMatch = "Batumi";
-            else if (/кутаиси|kutaisi/i.test(userPrompt)) cityMatch = "Kutaisi";
+          const roomsMatch = userPrompt.match(/(\d+)\s*(?:комнат|комн|room|спальн)/i)?.[1];
+          const roomsCount = roomsMatch ? Number(roomsMatch) : 0;
 
-            action = {
-              type: "CREATE_CLIENT",
-              data: {
-                name: nameMatch.trim(),
-                phone: phoneMatch,
-                budget: Number(budgetMatch) || 0,
-                city: cityMatch || (user?.country === "Armenia" ? "Yerevan" : user?.country === "Kazakhstan" ? "Almaty" : "Tbilisi"),
-                rooms: Number(roomsMatch) || 1
-              }
-            };
+          // If rooms were not provided in user prompt, we MUST NOT create the client with 1 room.
+          // Instead, ensure the assistant asks how many rooms are needed.
+          if (roomsCount <= 0) {
+            const alreadyAsksRooms = /комнат|room|ოთახ/i.test(aiText);
+            if (!alreadyAsksRooms) {
+              aiText = (language === 'ru' ? "К сожалению, я не знаю сколько комнат ищет клиент. Пожалуйста, укажите количество комнат." : 
+                        language === 'ka' ? "სამწუხაროდ, მე არ ვიცი რამდენი ოთახია კლიენტი ეძებს. გთხოვთ მიუთითოთ ოთახების რაოდენობა." :
+                        "Sorry, I don't know how many rooms the client is looking for. Please provide the number of rooms.");
+            }
+            action = null;
+          } else {
+            const nameMatch = confirmsClientMatch 
+              ? confirmsClientMatch[1] 
+              : userPrompt.match(/(?:клиент(?:а)?)\s+([A-ZА-ЯЁ][a-zа-яё]+(?:\s+[A-ZА-ЯЁ][a-zа-яё]+)*)/i)?.[1];
+            if (nameMatch) {
+              const phoneMatch = userPrompt.match(/(\+?\d[\d\s-]{6,15}\d)/)?.[0]?.replace(/[\s-]/g, "") || "";
+              const budgetMatch = userPrompt.match(/(?:бюджет|цена|до)\s*[:=]?\s*(\d+)/i)?.[1] || 
+                                  userPrompt.match(/(\d+)\s*(?:\$|доллар|usd)/i)?.[1] || "0";
+              let cityMatch = "";
+              if (/тбилиси|tbilisi/i.test(userPrompt)) cityMatch = "Tbilisi";
+              else if (/батуми|batumi/i.test(userPrompt)) cityMatch = "Batumi";
+              else if (/кутаиси|kutaisi/i.test(userPrompt)) cityMatch = "Kutaisi";
+
+              action = {
+                type: "CREATE_CLIENT",
+                data: {
+                  name: nameMatch.trim(),
+                  phone: phoneMatch,
+                  budget: Number(budgetMatch) || 0,
+                  city: cityMatch || (user?.country === "Armenia" ? "Yerevan" : user?.country === "Kazakhstan" ? "Almaty" : "Tbilisi"),
+                  rooms: roomsCount
+                }
+              };
+            }
           }
         }
       }
